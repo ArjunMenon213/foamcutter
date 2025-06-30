@@ -1,4 +1,4 @@
-python_version == "3.11.*"
+python-3.11.8
 streamlit
 streamlit-drawable-canvas
 Pillow
