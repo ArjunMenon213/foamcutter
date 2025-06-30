@@ -1,6 +1,3 @@
-# CHNAGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
-# ENABLE A PYTHON ENVIRONMENT ------    source foamenv/bin/activate
-
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
@@ -9,14 +6,14 @@ import cv2
 import plotly.graph_objects as go
 from scipy.spatial import Delaunay
 from stl import mesh
-import io
 import tempfile
 import matplotlib.pyplot as plt
-import ezdxf  # <-- DXF support
+import ezdxf
 
 st.set_page_config(layout="wide", page_title="Tool Foam Cutout Designer")
-
 UI_MAX_SIZE = 600  # px, for UI/canvas ops
+
+# --- Utility Functions ---
 
 def get_average_rgb(pixels):
     arr = np.array(pixels)
@@ -274,7 +271,6 @@ def export_dxf_from_contours(contours, scale_x, scale_y, fname="cutout.dxf"):
         points = [(float(x), float(y)) for x, y in pts]
         if len(points) > 1:
             msp.add_lwpolyline(points, close=True)
-    # Write to a StringIO (text) and encode to bytes for download
     import io
     dxf_text = io.StringIO()
     doc.write(dxf_text)
@@ -298,24 +294,19 @@ def sync_slider_and_input(label, min_value, max_value, value, key, step=1):
         slider_val = input_val
     return slider_val
 
-if "last_width" not in st.session_state:
-    st.session_state.last_width = 200
-if "last_length" not in st.session_state:
-    st.session_state.last_length = 200
-if "bg_canvas_key" not in st.session_state:
-    st.session_state.bg_canvas_key = 0
-if "hole_canvas_key" not in st.session_state:
-    st.session_state.hole_canvas_key = 0
-if "holes" not in st.session_state:
-    st.session_state.holes = []
-if "finalized_holes" not in st.session_state:
-    st.session_state.finalized_holes = []
-if "finalized" not in st.session_state:
-    st.session_state.finalized = False
-if "erase_paths" not in st.session_state:
-    st.session_state.erase_paths = []
-if "erase_brush_size" not in st.session_state:
-    st.session_state.erase_brush_size = 20
+# --- Initialize session state ---
+
+st.session_state.setdefault("last_width", 200)
+st.session_state.setdefault("last_length", 200)
+st.session_state.setdefault("bg_canvas_key", 0)
+st.session_state.setdefault("hole_canvas_key", 0)
+st.session_state.setdefault("holes", [])
+st.session_state.setdefault("finalized_holes", [])
+st.session_state.setdefault("finalized", False)
+st.session_state.setdefault("erase_paths", [])
+st.session_state.setdefault("erase_brush_size", 20)
+
+# --- UI ---
 
 st.title("Embry-Riddle Aeronautical University - Mechanical Engineering Department")
 st.title("Senior Design : Project Tracker : Automatic Tool Cutout Designer")
@@ -352,6 +343,9 @@ if uploaded:
     scale = min(UI_MAX_SIZE / max(orig_w, orig_h), 1.0)
     ui_w, ui_h = int(orig_w * scale), int(orig_h * scale)
     ui_image = orig_image.resize((ui_w, ui_h), Image.LANCZOS)
+    # --- Ensure ui_image is always PIL.Image for canvas ---
+    if not isinstance(ui_image, Image.Image):
+        ui_image = Image.fromarray(np.array(ui_image))
 else:
     st.info("Upload an image to get started.")
     st.stop()
@@ -365,6 +359,9 @@ canvas_col, slider_col = st.columns([2,1])
 with canvas_col:
     if "bg_pixels" not in st.session_state:
         st.session_state.bg_pixels = []
+    # --- Ensure PIL.Image for canvas ---
+    if not isinstance(ui_image, Image.Image):
+        ui_image = Image.fromarray(np.array(ui_image))
     canvas_result = st_canvas(
         fill_color="rgba(255, 0, 0, 0.3)",
         stroke_width=5,
@@ -440,6 +437,9 @@ with canvas_col:
         draw_finger_holes(np.zeros_like(border_mask), holes_for_mask)
     )
     hole_canvas_background = show_mask_overlay_with_holes(ui_image, border_mask, holes_for_mask)
+    # --- Ensure PIL.Image for canvas ---
+    if not isinstance(hole_canvas_background, Image.Image):
+        hole_canvas_background = Image.fromarray(np.array(hole_canvas_background))
 
     if tool_mode == "Circle (add hole)":
         canvas_result_holes = st_canvas(
