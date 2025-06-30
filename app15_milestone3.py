@@ -1,3 +1,6 @@
+# CHNAGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
+# ENABLE A PYTHON ENVIRONMENT ------    source foamenv/bin/activate
+
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
@@ -9,17 +12,11 @@ from stl import mesh
 import io
 import tempfile
 import matplotlib.pyplot as plt
-import ezdxf  # For DXF export
+import ezdxf  # <-- DXF support
 
 st.set_page_config(layout="wide", page_title="Tool Foam Cutout Designer")
 
 UI_MAX_SIZE = 600  # px, for UI/canvas ops
-
-def pil_to_bytes(img):
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
 
 def get_average_rgb(pixels):
     arr = np.array(pixels)
@@ -277,6 +274,8 @@ def export_dxf_from_contours(contours, scale_x, scale_y, fname="cutout.dxf"):
         points = [(float(x), float(y)) for x, y in pts]
         if len(points) > 1:
             msp.add_lwpolyline(points, close=True)
+    # Write to a StringIO (text) and encode to bytes for download
+    import io
     dxf_text = io.StringIO()
     doc.write(dxf_text)
     dxf_bytes = dxf_text.getvalue().encode("utf-8")
@@ -342,24 +341,24 @@ if size_changed:
 st.session_state.last_width = width
 st.session_state.last_length = length
 
-if not uploaded:
-    st.info("Upload an image to get started.")
-    st.stop()
-
-try:
+if uploaded:
     orig_image = Image.open(uploaded)
-    orig_image = orig_image.convert("RGB")
+    if orig_image.mode in ("RGBA", "LA") or (orig_image.mode == "P" and "transparency" in orig_image.info):
+        background = Image.new("RGBA", orig_image.size, (255,255,255,255))
+        orig_image = Image.alpha_composite(background, orig_image.convert("RGBA")).convert("RGB")
+    else:
+        orig_image = orig_image.convert("RGB")
     orig_w, orig_h = orig_image.width, orig_image.height
     scale = min(UI_MAX_SIZE / max(orig_w, orig_h), 1.0)
     ui_w, ui_h = int(orig_w * scale), int(orig_h * scale)
     ui_image = orig_image.resize((ui_w, ui_h), Image.LANCZOS)
-except Exception as e:
-    st.error(f"Could not open image: {e}")
+else:
+    st.info("Upload an image to get started.")
     st.stop()
 
 col1, col2 = st.columns([2,1])
 with col1:
-    st.image(ui_image, caption=f"UI Image: {ui_w} x {ui_h} px", use_container_width=True)
+    st.image(ui_image, caption=f"UI Image: {ui_w} x {ui_h} px", use_column_width=True)
 
 st.markdown("### 2. Select Background Pixels (Draw Points on Image)")
 canvas_col, slider_col = st.columns([2,1])
@@ -369,7 +368,7 @@ with canvas_col:
     canvas_result = st_canvas(
         fill_color="rgba(255, 0, 0, 0.3)",
         stroke_width=5,
-        background_image=pil_to_bytes(ui_image),
+        background_image=ui_image,
         update_streamlit=True,
         height=ui_h,
         width=ui_w,
@@ -446,7 +445,7 @@ with canvas_col:
         canvas_result_holes = st_canvas(
             fill_color="rgba(255,255,0,0.4)",
             stroke_width=5,
-            background_image=pil_to_bytes(hole_canvas_background),
+            background_image=hole_canvas_background,
             update_streamlit=True,
             height=ui_h,
             width=ui_w,
@@ -471,7 +470,7 @@ with canvas_col:
         canvas_result_brush = st_canvas(
             fill_color="rgba(0,0,0,0.0)",
             stroke_width=st.session_state.erase_brush_size,
-            background_image=pil_to_bytes(hole_canvas_background),
+            background_image=hole_canvas_background,
             update_streamlit=True,
             height=ui_h,
             width=ui_w,
@@ -539,7 +538,7 @@ if st.session_state.finalized:
 
     with col3dctrl:
         if st.button("Export STL - for 3d-Printing and CAD applications"):
-            if not cavity_contours or len(cavity_contours) == 0:
+            if not cavity_contours or len(cavity_contours)==0:
                 st.error("No valid cavity for export.")
             else:
                 st.info("Exporting, please wait...")
@@ -550,7 +549,7 @@ if st.session_state.finalized:
                 )
 
         if st.button("Export DXF - for laser Cutting "):
-            if not cavity_contours or len(cavity_contours) == 0:
+            if not cavity_contours or len(cavity_contours)==0:
                 st.error("No valid cavity for export.")
             else:
                 st.info("Exporting DXF, please wait...")
