@@ -342,6 +342,7 @@ if size_changed:
 st.session_state.last_width = width
 st.session_state.last_length = length
 
+# --------- All code using ui_image and related vars is now INSIDE this block -----------
 if uploaded:
     orig_image = Image.open(uploaded)
     if orig_image.mode in ("RGBA", "LA") or (orig_image.mode == "P" and "transparency" in orig_image.info):
@@ -353,210 +354,210 @@ if uploaded:
     scale = min(UI_MAX_SIZE / max(orig_w, orig_h), 1.0)
     ui_w, ui_h = int(orig_w * scale), int(orig_h * scale)
     ui_image = orig_image.resize((ui_w, ui_h), Image.LANCZOS)
+
+    col1, col2 = st.columns([2,1])
+    with col1:
+        st.image(ui_image, caption=f"UI Image: {ui_w} x {ui_h} px", use_container_width=True)
+
+    st.markdown("### 2. Select Background Pixels (Draw Points on Image)")
+    canvas_col, slider_col = st.columns([2,1])
+    with canvas_col:
+        if "bg_pixels" not in st.session_state:
+            st.session_state.bg_pixels = []
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 0, 0, 0.3)",
+            stroke_width=5,
+            background_image=pil_to_bytes(ui_image),
+            update_streamlit=True,
+            height=ui_h,
+            width=ui_w,
+            drawing_mode="point",
+            point_display_radius=6,
+            key=f"canvas_bg_{ui_w}_{ui_h}_{st.session_state.bg_canvas_key}"
+        )
+        bg_points = []
+        if canvas_result.json_data and "objects" in canvas_result.json_data:
+            bg_points = [
+                (int(obj["left"]), int(obj["top"]))
+                for obj in canvas_result.json_data["objects"] if obj["type"] == "circle"
+            ]
+            st.session_state.bg_pixels = [ui_image.getpixel((x, y)) for x, y in bg_points if 0 <= x < ui_w and 0 <= y < ui_h]
+
+    with slider_col:
+        if st.button("Clear Selected Background Pixels"):
+            st.session_state.bg_pixels = []
+            st.session_state.bg_canvas_key += 1
+            st.experimental_rerun()
+
+        if st.session_state.bg_pixels:
+            st.write(f"Selected: {len(st.session_state.bg_pixels)} pixels")
+            avg_rgb = get_average_rgb(st.session_state.bg_pixels)
+            st.write(f"Average RGB: {avg_rgb}")
+        else:
+            st.warning("No background pixels selected yet.")
+            st.stop()
+
+    st.markdown("### 3. Chroma Key and Border/Finger Holes")
+    canvas_col, slider_col = st.columns([2,1])
+    with slider_col:
+        tol = sync_slider_and_input("Chroma Key Tolerance", 1, 80, 25, "tol")
+        init_thickness = sync_slider_and_input("Border Thickness (in mm)", 0, 100, 6, "init_thickness")
+    with canvas_col:
+        mask = apply_chroma_key(ui_image, avg_rgb, tol)
+        border_mask = dilate_mask(mask, init_thickness)
+
+    st.markdown("#### Add Finger Holes or Brush Erase (Draw Circles or Freehand Erase)")
+    canvas_col, slider_col = st.columns([2,1])
+
+    with slider_col:
+        tool_mode = st.radio("Drawing tool", ["Circle (add hole)", "Brush (erase blemish)"], horizontal=True)
+        if tool_mode == "Brush (erase blemish)":
+            st.session_state.erase_brush_size = st.slider("Brush size (px)", 5, 50, st.session_state.erase_brush_size, key="brush_size")
+        if st.button("Clear All Holes & Brush Erase"):
+            st.session_state.holes = []
+            st.session_state.finalized_holes = []
+            st.session_state.finalized = False
+            st.session_state.erase_paths = []
+            st.session_state.hole_canvas_key += 1
+            st.experimental_rerun()
+        if st.session_state.holes:
+            st.write("Adjust radii for finger holes (set to 0 to delete):")
+            for i, (x, y, r) in enumerate(st.session_state.holes):
+                st.session_state.holes[i] = (
+                    x, y,
+                    sync_slider_and_input(f"Hole {i+1} radius", 0, max(ui_w, ui_h)//2, r, f"hole_radius_{i}")
+                )
+        if st.button("Finalize"):
+            st.session_state.finalized_holes = list(st.session_state.holes)
+            st.session_state.finalized = True
+            st.success("Finalized! See updated 3D preview below.")
+
+    with canvas_col:
+        holes_for_mask = [h for h in st.session_state.holes if h[2] > 0]
+        combined_mask = cv2.bitwise_or(
+            border_mask,
+            draw_finger_holes(np.zeros_like(border_mask), holes_for_mask)
+        )
+        hole_canvas_background = show_mask_overlay_with_holes(ui_image, border_mask, holes_for_mask)
+
+        if tool_mode == "Circle (add hole)":
+            canvas_result_holes = st_canvas(
+                fill_color="rgba(255,255,0,0.4)",
+                stroke_width=5,
+                background_image=pil_to_bytes(hole_canvas_background),
+                update_streamlit=True,
+                height=ui_h,
+                width=ui_w,
+                drawing_mode="circle",
+                key=f"canvas_holes_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}"
+            )
+            new_holes = []
+            if canvas_result_holes.json_data and "objects" in canvas_result_holes.json_data:
+                for obj in canvas_result_holes.json_data["objects"]:
+                    if obj["type"] == "circle":
+                        x = int(obj["left"])
+                        y = int(obj["top"])
+                        existing_idx = next((i for i, h in enumerate(st.session_state.holes)
+                                             if abs(h[0]-x) < 4 and abs(h[1]-y) < 4), None)
+                        if existing_idx is not None:
+                            r = st.session_state.holes[existing_idx][2]
+                        else:
+                            r = int(obj["radius"])
+                        new_holes.append((x, y, r))
+            st.session_state.holes = new_holes
+        else:
+            canvas_result_brush = st_canvas(
+                fill_color="rgba(0,0,0,0.0)",
+                stroke_width=st.session_state.erase_brush_size,
+                background_image=pil_to_bytes(hole_canvas_background),
+                update_streamlit=True,
+                height=ui_h,
+                width=ui_w,
+                drawing_mode="freedraw",
+                key=f"canvas_erase_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}"
+            )
+            if canvas_result_brush.json_data and "objects" in canvas_result_brush.json_data:
+                erase_paths = []
+                for obj in canvas_result_brush.json_data["objects"]:
+                    if obj["type"] == "path":
+                        path_points = obj.get("path", [])
+                        for point in path_points:
+                            if len(point) >= 3:
+                                x, y = int(point[1]), int(point[2])
+                                erase_paths.append((x, y, st.session_state.erase_brush_size))
+                st.session_state.erase_paths += erase_paths
+
+        erase_mask = np.zeros_like(combined_mask)
+        for (x, y, brush_size) in st.session_state.erase_paths:
+            cv2.circle(erase_mask, (x, y), brush_size//2, 255, -1)
+        combined_mask[erase_mask==255] = 0
+
+    if st.session_state.finalized:
+        st.markdown("### 4. 3D Preview & STL/DXF Export")
+        col3d1, col3d2, col3dctrl = st.columns([1.5,1.5,1])
+        final_mask = cv2.bitwise_or(
+            border_mask,
+            draw_finger_holes(np.zeros_like(border_mask), [h for h in st.session_state.finalized_holes if h[2] > 0])
+        )
+        erase_mask = np.zeros_like(final_mask)
+        for (x, y, brush_size) in st.session_state.erase_paths:
+            cv2.circle(erase_mask, (x, y), brush_size//2, 255, -1)
+        final_mask[erase_mask==255] = 0
+
+        export_mask = cv2.resize(final_mask, (ui_w, ui_h), interpolation=cv2.INTER_NEAREST)
+        export_h, export_w = export_mask.shape
+        scale_x = width / export_w
+        scale_y = length / export_h
+        cavity_contours, hierarchy = find_cavity_contours(export_mask)
+
+        with col3dctrl:
+            base_depth = sync_slider_and_input("Foam Base Depth (mm)", 1, 5000, 30, "base_depth")
+            cavity_depth = sync_slider_and_input("Cavity Depth (mm)", 1, 5000, 15, "cavity_depth")
+            cavity_offset = sync_slider_and_input("Cavity Offset (mm)", 0, 5000, 0, "cavity_offset")
+
+            stl_file_name = st.text_input(
+                "STL File Name - change by the textbox below - ", value="tool_foam_cutout.stl", key="stl_file_name"
+            )
+            if not stl_file_name.lower().endswith(".stl"):
+                stl_file_name += ".stl"
+
+        with col3d1:
+            st.markdown("**Matplotlib 3D View**")
+            if cavity_contours is not None and len(cavity_contours) > 0:
+                plot_3d_foam_matplotlib(width, length, base_depth, cavity_depth, cavity_offset, cavity_contours, scale_x, scale_y)
+            else:
+                st.warning("No cavity contours found for 3D preview.")
+
+        with col3d2:
+            st.markdown("**Plotly 3D View (Mesh3d, Interactive)**")
+            if cavity_contours is not None and len(cavity_contours) > 0:
+                plot_3d_foam_plotly_mesh3d(width, length, base_depth, cavity_depth, cavity_offset, cavity_contours, scale_x, scale_y)
+            else:
+                st.warning("No cavity contours found for 3D preview.")
+
+        with col3dctrl:
+            if st.button("Export STL - for 3d-Printing and CAD applications"):
+                if not cavity_contours or len(cavity_contours)==0:
+                    st.error("No valid cavity for export.")
+                else:
+                    st.info("Exporting, please wait...")
+                    st.download_button(
+                        label="Download STL",
+                        data=export_stl_cached(cavity_contours, hierarchy, width, length, base_depth, cavity_depth, cavity_offset, scale_x, scale_y),
+                        file_name=stl_file_name
+                    )
+
+            if st.button("Export DXF - for laser Cutting "):
+                if not cavity_contours or len(cavity_contours)==0:
+                    st.error("No valid cavity for export.")
+                else:
+                    st.info("Exporting DXF, please wait...")
+                    dxf_file_name = stl_file_name.rsplit('.', 1)[0] + ".dxf"
+                    st.download_button(
+                        label="Download DXF",
+                        data=export_dxf_from_contours(cavity_contours, scale_x, scale_y, dxf_file_name),
+                        file_name=dxf_file_name
+                    )
 else:
     st.info("Upload an image to get started.")
     st.stop()
-
-col1, col2 = st.columns([2,1])
-with col1:
-    st.image(ui_image, caption=f"UI Image: {ui_w} x {ui_h} px", use_container_width=True)
-
-st.markdown("### 2. Select Background Pixels (Draw Points on Image)")
-canvas_col, slider_col = st.columns([2,1])
-with canvas_col:
-    if "bg_pixels" not in st.session_state:
-        st.session_state.bg_pixels = []
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 0, 0, 0.3)",
-        stroke_width=5,
-        background_image=pil_to_bytes(ui_image),
-        update_streamlit=True,
-        height=ui_h,
-        width=ui_w,
-        drawing_mode="point",
-        point_display_radius=6,
-        key=f"canvas_bg_{ui_w}_{ui_h}_{st.session_state.bg_canvas_key}"
-    )
-    bg_points = []
-    if canvas_result.json_data and "objects" in canvas_result.json_data:
-        bg_points = [
-            (int(obj["left"]), int(obj["top"]))
-            for obj in canvas_result.json_data["objects"] if obj["type"] == "circle"
-        ]
-        st.session_state.bg_pixels = [ui_image.getpixel((x, y)) for x, y in bg_points if 0 <= x < ui_w and 0 <= y < ui_h]
-
-with slider_col:
-    if st.button("Clear Selected Background Pixels"):
-        st.session_state.bg_pixels = []
-        st.session_state.bg_canvas_key += 1
-        st.experimental_rerun()
-
-    if st.session_state.bg_pixels:
-        st.write(f"Selected: {len(st.session_state.bg_pixels)} pixels")
-        avg_rgb = get_average_rgb(st.session_state.bg_pixels)
-        st.write(f"Average RGB: {avg_rgb}")
-    else:
-        st.warning("No background pixels selected yet.")
-        st.stop()
-
-st.markdown("### 3. Chroma Key and Border/Finger Holes")
-canvas_col, slider_col = st.columns([2,1])
-with slider_col:
-    tol = sync_slider_and_input("Chroma Key Tolerance", 1, 80, 25, "tol")
-    init_thickness = sync_slider_and_input("Border Thickness (in mm)", 0, 100, 6, "init_thickness")
-with canvas_col:
-    mask = apply_chroma_key(ui_image, avg_rgb, tol)
-    border_mask = dilate_mask(mask, init_thickness)
-
-st.markdown("#### Add Finger Holes or Brush Erase (Draw Circles or Freehand Erase)")
-canvas_col, slider_col = st.columns([2,1])
-
-with slider_col:
-    tool_mode = st.radio("Drawing tool", ["Circle (add hole)", "Brush (erase blemish)"], horizontal=True)
-    if tool_mode == "Brush (erase blemish)":
-        st.session_state.erase_brush_size = st.slider("Brush size (px)", 5, 50, st.session_state.erase_brush_size, key="brush_size")
-    if st.button("Clear All Holes & Brush Erase"):
-        st.session_state.holes = []
-        st.session_state.finalized_holes = []
-        st.session_state.finalized = False
-        st.session_state.erase_paths = []
-        st.session_state.hole_canvas_key += 1
-        st.experimental_rerun()
-    if st.session_state.holes:
-        st.write("Adjust radii for finger holes (set to 0 to delete):")
-        for i, (x, y, r) in enumerate(st.session_state.holes):
-            st.session_state.holes[i] = (
-                x, y,
-                sync_slider_and_input(f"Hole {i+1} radius", 0, max(ui_w, ui_h)//2, r, f"hole_radius_{i}")
-            )
-    if st.button("Finalize"):
-        st.session_state.finalized_holes = list(st.session_state.holes)
-        st.session_state.finalized = True
-        st.success("Finalized! See updated 3D preview below.")
-
-with canvas_col:
-    holes_for_mask = [h for h in st.session_state.holes if h[2] > 0]
-    combined_mask = cv2.bitwise_or(
-        border_mask,
-        draw_finger_holes(np.zeros_like(border_mask), holes_for_mask)
-    )
-    hole_canvas_background = show_mask_overlay_with_holes(ui_image, border_mask, holes_for_mask)
-
-    if tool_mode == "Circle (add hole)":
-        canvas_result_holes = st_canvas(
-            fill_color="rgba(255,255,0,0.4)",
-            stroke_width=5,
-            background_image=pil_to_bytes(hole_canvas_background),
-            update_streamlit=True,
-            height=ui_h,
-            width=ui_w,
-            drawing_mode="circle",
-            key=f"canvas_holes_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}"
-        )
-        new_holes = []
-        if canvas_result_holes.json_data and "objects" in canvas_result_holes.json_data:
-            for obj in canvas_result_holes.json_data["objects"]:
-                if obj["type"] == "circle":
-                    x = int(obj["left"])
-                    y = int(obj["top"])
-                    existing_idx = next((i for i, h in enumerate(st.session_state.holes)
-                                         if abs(h[0]-x) < 4 and abs(h[1]-y) < 4), None)
-                    if existing_idx is not None:
-                        r = st.session_state.holes[existing_idx][2]
-                    else:
-                        r = int(obj["radius"])
-                    new_holes.append((x, y, r))
-        st.session_state.holes = new_holes
-    else:
-        canvas_result_brush = st_canvas(
-            fill_color="rgba(0,0,0,0.0)",
-            stroke_width=st.session_state.erase_brush_size,
-            background_image=pil_to_bytes(hole_canvas_background),
-            update_streamlit=True,
-            height=ui_h,
-            width=ui_w,
-            drawing_mode="freedraw",
-            key=f"canvas_erase_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}"
-        )
-        if canvas_result_brush.json_data and "objects" in canvas_result_brush.json_data:
-            erase_paths = []
-            for obj in canvas_result_brush.json_data["objects"]:
-                if obj["type"] == "path":
-                    path_points = obj.get("path", [])
-                    for point in path_points:
-                        if len(point) >= 3:
-                            x, y = int(point[1]), int(point[2])
-                            erase_paths.append((x, y, st.session_state.erase_brush_size))
-            st.session_state.erase_paths += erase_paths
-
-    erase_mask = np.zeros_like(combined_mask)
-    for (x, y, brush_size) in st.session_state.erase_paths:
-        cv2.circle(erase_mask, (x, y), brush_size//2, 255, -1)
-    combined_mask[erase_mask==255] = 0
-
-if st.session_state.finalized:
-    st.markdown("### 4. 3D Preview & STL/DXF Export")
-    col3d1, col3d2, col3dctrl = st.columns([1.5,1.5,1])
-    final_mask = cv2.bitwise_or(
-        border_mask,
-        draw_finger_holes(np.zeros_like(border_mask), [h for h in st.session_state.finalized_holes if h[2] > 0])
-    )
-    erase_mask = np.zeros_like(final_mask)
-    for (x, y, brush_size) in st.session_state.erase_paths:
-        cv2.circle(erase_mask, (x, y), brush_size//2, 255, -1)
-    final_mask[erase_mask==255] = 0
-
-    export_mask = cv2.resize(final_mask, (ui_w, ui_h), interpolation=cv2.INTER_NEAREST)
-    export_h, export_w = export_mask.shape
-    scale_x = width / export_w
-    scale_y = length / export_h
-    cavity_contours, hierarchy = find_cavity_contours(export_mask)
-
-    with col3dctrl:
-        base_depth = sync_slider_and_input("Foam Base Depth (mm)", 1, 5000, 30, "base_depth")
-        cavity_depth = sync_slider_and_input("Cavity Depth (mm)", 1, 5000, 15, "cavity_depth")
-        cavity_offset = sync_slider_and_input("Cavity Offset (mm)", 0, 5000, 0, "cavity_offset")
-
-        stl_file_name = st.text_input(
-            "STL File Name - change by the textbox below - ", value="tool_foam_cutout.stl", key="stl_file_name"
-        )
-        if not stl_file_name.lower().endswith(".stl"):
-            stl_file_name += ".stl"
-
-    with col3d1:
-        st.markdown("**Matplotlib 3D View**")
-        if cavity_contours is not None and len(cavity_contours) > 0:
-            plot_3d_foam_matplotlib(width, length, base_depth, cavity_depth, cavity_offset, cavity_contours, scale_x, scale_y)
-        else:
-            st.warning("No cavity contours found for 3D preview.")
-
-    with col3d2:
-        st.markdown("**Plotly 3D View (Mesh3d, Interactive)**")
-        if cavity_contours is not None and len(cavity_contours) > 0:
-            plot_3d_foam_plotly_mesh3d(width, length, base_depth, cavity_depth, cavity_offset, cavity_contours, scale_x, scale_y)
-        else:
-            st.warning("No cavity contours found for 3D preview.")
-
-    with col3dctrl:
-        if st.button("Export STL - for 3d-Printing and CAD applications"):
-            if not cavity_contours or len(cavity_contours)==0:
-                st.error("No valid cavity for export.")
-            else:
-                st.info("Exporting, please wait...")
-                st.download_button(
-                    label="Download STL",
-                    data=export_stl_cached(cavity_contours, hierarchy, width, length, base_depth, cavity_depth, cavity_offset, scale_x, scale_y),
-                    file_name=stl_file_name
-                )
-
-        if st.button("Export DXF - for laser Cutting "):
-            if not cavity_contours or len(cavity_contours)==0:
-                st.error("No valid cavity for export.")
-            else:
-                st.info("Exporting DXF, please wait...")
-                dxf_file_name = stl_file_name.rsplit('.', 1)[0] + ".dxf"
-                st.download_button(
-                    label="Download DXF",
-                    data=export_dxf_from_contours(cavity_contours, scale_x, scale_y, dxf_file_name),
-                    file_name=dxf_file_name
-                )
