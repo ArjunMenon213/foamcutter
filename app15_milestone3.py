@@ -18,6 +18,12 @@ st.set_page_config(layout="wide", page_title="Tool Foam Cutout Designer")
 
 UI_MAX_SIZE = 600  # px, for UI/canvas ops
 
+def pil_to_bytes(img):
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
 def get_average_rgb(pixels):
     arr = np.array(pixels)
     return tuple(np.mean(arr, axis=0, dtype=int))
@@ -274,8 +280,6 @@ def export_dxf_from_contours(contours, scale_x, scale_y, fname="cutout.dxf"):
         points = [(float(x), float(y)) for x, y in pts]
         if len(points) > 1:
             msp.add_lwpolyline(points, close=True)
-    # Write to a StringIO (text) and encode to bytes for download
-    import io
     dxf_text = io.StringIO()
     doc.write(dxf_text)
     dxf_bytes = dxf_text.getvalue().encode("utf-8")
@@ -358,7 +362,7 @@ else:
 
 col1, col2 = st.columns([2,1])
 with col1:
-    st.image(ui_image, caption=f"UI Image: {ui_w} x {ui_h} px", use_column_width=True)
+    st.image(pil_to_bytes(ui_image), caption=f"UI Image: {ui_w} x {ui_h} px", use_container_width=True)
 
 st.markdown("### 2. Select Background Pixels (Draw Points on Image)")
 canvas_col, slider_col = st.columns([2,1])
@@ -368,7 +372,7 @@ with canvas_col:
     canvas_result = st_canvas(
         fill_color="rgba(255, 0, 0, 0.3)",
         stroke_width=5,
-        background_image=ui_image,
+        background_image=pil_to_bytes(ui_image),
         update_streamlit=True,
         height=ui_h,
         width=ui_w,
@@ -445,7 +449,7 @@ with canvas_col:
         canvas_result_holes = st_canvas(
             fill_color="rgba(255,255,0,0.4)",
             stroke_width=5,
-            background_image=hole_canvas_background,
+            background_image=pil_to_bytes(hole_canvas_background),
             update_streamlit=True,
             height=ui_h,
             width=ui_w,
@@ -470,7 +474,7 @@ with canvas_col:
         canvas_result_brush = st_canvas(
             fill_color="rgba(0,0,0,0.0)",
             stroke_width=st.session_state.erase_brush_size,
-            background_image=hole_canvas_background,
+            background_image=pil_to_bytes(hole_canvas_background),
             update_streamlit=True,
             height=ui_h,
             width=ui_w,
