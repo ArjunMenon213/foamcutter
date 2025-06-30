@@ -1,6 +1,3 @@
-# CHNAGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
-# ENABLE A PYTHON ENVIRONMENT ------    source foamenv/bin/activate
-
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
@@ -12,7 +9,7 @@ from stl import mesh
 import io
 import tempfile
 import matplotlib.pyplot as plt
-import ezdxf  # <-- DXF support
+import ezdxf  # For DXF export
 
 st.set_page_config(layout="wide", page_title="Tool Foam Cutout Designer")
 
@@ -362,7 +359,7 @@ else:
 
 col1, col2 = st.columns([2,1])
 with col1:
-    st.image(pil_to_bytes(ui_image), caption=f"UI Image: {ui_w} x {ui_h} px", use_container_width=True)
+    st.image(ui_image, caption=f"UI Image: {ui_w} x {ui_h} px", use_container_width=True)
 
 st.markdown("### 2. Select Background Pixels (Draw Points on Image)")
 canvas_col, slider_col = st.columns([2,1])
