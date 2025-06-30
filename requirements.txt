@@ -1,0 +1,10 @@
+streamlit
+streamlit-drawable-canvas
+Pillow
+numpy
+opencv-python-headless
+plotly
+scipy
+numpy-stl
+ezdxf
+matplotlib
