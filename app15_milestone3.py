@@ -352,7 +352,7 @@ else:
 
 col1, col2 = st.columns([2,1])
 with col1:
-    st.image(ui_image, caption=f"UI Image: {ui_w} x {ui_h} px", use_column_width=True)
+    st.image(ui_image, caption=f"UI Image: {ui_w} x {ui_h} px", use_container_width=True)
 
 st.markdown("### 2. Select Background Pixels (Draw Points on Image)")
 canvas_col, slider_col = st.columns([2,1])
