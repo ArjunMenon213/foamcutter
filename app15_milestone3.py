@@ -1,4 +1,4 @@
-# CHNAGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
+# CHANGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
 # ENABLE A PYTHON ENVIRONMENT ------    source foamenv/bin/activate
 
 import streamlit as st
@@ -43,13 +43,27 @@ def draw_finger_holes(mask, holes):
     return mask
 
 def show_mask_overlay_with_holes(image, mask, holes):
+    # Ensure image is in RGB mode
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    
     overlay = np.array(image.copy())
-    overlay[mask==255] = [255,0,0]
+    
+    # Apply mask overlay
+    overlay[mask == 255] = [255, 0, 0]
+    
+    # Draw holes
     for x, y, r in holes:
         if r > 0:
-            cv2.circle(overlay, (int(x), int(y)), int(r), (255,0,0), -1)
-            cv2.circle(overlay, (int(x), int(y)), int(r), (255,255,0), 2)
-    return Image.fromarray(overlay)
+            cv2.circle(overlay, (int(x), int(y)), int(r), (255, 0, 0), -1)
+            cv2.circle(overlay, (int(x), int(y)), int(r), (255, 255, 0), 2)
+    
+    # Convert back to PIL Image and ensure RGB mode
+    result_image = Image.fromarray(overlay.astype(np.uint8))
+    if result_image.mode != "RGB":
+        result_image = result_image.convert("RGB")
+    
+    return result_image
 
 def find_cavity_contours(mask):
     contours, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
@@ -298,6 +312,7 @@ def sync_slider_and_input(label, min_value, max_value, value, key, step=1):
         slider_val = input_val
     return slider_val
 
+# Initialize session state
 if "last_width" not in st.session_state:
     st.session_state.last_width = 200
 if "last_length" not in st.session_state:
@@ -316,6 +331,8 @@ if "erase_paths" not in st.session_state:
     st.session_state.erase_paths = []
 if "erase_brush_size" not in st.session_state:
     st.session_state.erase_brush_size = 20
+if "canvas_refresh_counter" not in st.session_state:
+    st.session_state.canvas_refresh_counter = 0
 
 st.title("Embry-Riddle Aeronautical University - Mechanical Engineering Department")
 st.title("Senior Design : Project Tracker : Automatic Tool Cutout Designer")
@@ -338,20 +355,39 @@ if size_changed:
     st.session_state.bg_canvas_key += 1
     st.session_state.hole_canvas_key += 1
     st.session_state.erase_paths = []
+    st.session_state.canvas_refresh_counter += 1
+
 st.session_state.last_width = width
 st.session_state.last_length = length
 
 if uploaded:
+    # Improved image processing
     orig_image = Image.open(uploaded)
+    
+    # Ensure proper image conversion
     if orig_image.mode in ("RGBA", "LA") or (orig_image.mode == "P" and "transparency" in orig_image.info):
-        background = Image.new("RGBA", orig_image.size, (255,255,255,255))
-        orig_image = Image.alpha_composite(background, orig_image.convert("RGBA")).convert("RGB")
+        background = Image.new("RGB", orig_image.size, (255, 255, 255))
+        if orig_image.mode == "P":
+            orig_image = orig_image.convert("RGBA")
+        if orig_image.mode == "RGBA":
+            background.paste(orig_image, mask=orig_image.split()[-1])
+        else:
+            background.paste(orig_image)
+        orig_image = background
     else:
         orig_image = orig_image.convert("RGB")
+    
     orig_w, orig_h = orig_image.width, orig_image.height
     scale = min(UI_MAX_SIZE / max(orig_w, orig_h), 1.0)
     ui_w, ui_h = int(orig_w * scale), int(orig_h * scale)
     ui_image = orig_image.resize((ui_w, ui_h), Image.LANCZOS)
+    
+    # Ensure the image is in the correct format for canvas
+    ui_image = ui_image.convert("RGB")
+    
+    # Debug info (temporary)
+    st.write(f"Image loaded successfully: {ui_w} x {ui_h} pixels, mode: {ui_image.mode}")
+    
 else:
     st.info("Upload an image to get started.")
     st.stop()
@@ -365,6 +401,10 @@ canvas_col, slider_col = st.columns([2,1])
 with canvas_col:
     if "bg_pixels" not in st.session_state:
         st.session_state.bg_pixels = []
+    
+    # Create unique key for canvas
+    canvas_key = f"canvas_bg_{ui_w}_{ui_h}_{st.session_state.bg_canvas_key}_{st.session_state.canvas_refresh_counter}"
+    
     canvas_result = st_canvas(
         fill_color="rgba(255, 0, 0, 0.3)",
         stroke_width=5,
@@ -374,8 +414,9 @@ with canvas_col:
         width=ui_w,
         drawing_mode="point",
         point_display_radius=6,
-        key=f"canvas_bg_{ui_w}_{ui_h}_{st.session_state.bg_canvas_key}"
+        key=canvas_key
     )
+    
     bg_points = []
     if canvas_result.json_data and "objects" in canvas_result.json_data:
         bg_points = [
@@ -388,7 +429,8 @@ with slider_col:
     if st.button("Clear Selected Background Pixels"):
         st.session_state.bg_pixels = []
         st.session_state.bg_canvas_key += 1
-        st.experimental_rerun()
+        st.session_state.canvas_refresh_counter += 1
+        st.rerun()
 
     if st.session_state.bg_pixels:
         st.write(f"Selected: {len(st.session_state.bg_pixels)} pixels")
@@ -403,6 +445,7 @@ canvas_col, slider_col = st.columns([2,1])
 with slider_col:
     tol = sync_slider_and_input("Chroma Key Tolerance", 1, 80, 25, "tol")
     init_thickness = sync_slider_and_input("Border Thickness (in mm)", 0, 100, 6, "init_thickness")
+
 with canvas_col:
     mask = apply_chroma_key(ui_image, avg_rgb, tol)
     border_mask = dilate_mask(mask, init_thickness)
@@ -414,13 +457,16 @@ with slider_col:
     tool_mode = st.radio("Drawing tool", ["Circle (add hole)", "Brush (erase blemish)"], horizontal=True)
     if tool_mode == "Brush (erase blemish)":
         st.session_state.erase_brush_size = st.slider("Brush size (px)", 5, 50, st.session_state.erase_brush_size, key="brush_size")
+    
     if st.button("Clear All Holes & Brush Erase"):
         st.session_state.holes = []
         st.session_state.finalized_holes = []
         st.session_state.finalized = False
         st.session_state.erase_paths = []
         st.session_state.hole_canvas_key += 1
-        st.experimental_rerun()
+        st.session_state.canvas_refresh_counter += 1
+        st.rerun()
+    
     if st.session_state.holes:
         st.write("Adjust radii for finger holes (set to 0 to delete):")
         for i, (x, y, r) in enumerate(st.session_state.holes):
@@ -428,6 +474,7 @@ with slider_col:
                 x, y,
                 sync_slider_and_input(f"Hole {i+1} radius", 0, max(ui_w, ui_h)//2, r, f"hole_radius_{i}")
             )
+    
     if st.button("Finalize"):
         st.session_state.finalized_holes = list(st.session_state.holes)
         st.session_state.finalized = True
@@ -442,6 +489,7 @@ with canvas_col:
     hole_canvas_background = show_mask_overlay_with_holes(ui_image, border_mask, holes_for_mask)
 
     if tool_mode == "Circle (add hole)":
+        hole_canvas_key = f"canvas_holes_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}_{st.session_state.canvas_refresh_counter}"
         canvas_result_holes = st_canvas(
             fill_color="rgba(255,255,0,0.4)",
             stroke_width=5,
@@ -450,7 +498,7 @@ with canvas_col:
             height=ui_h,
             width=ui_w,
             drawing_mode="circle",
-            key=f"canvas_holes_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}"
+            key=hole_canvas_key
         )
         new_holes = []
         if canvas_result_holes.json_data and "objects" in canvas_result_holes.json_data:
@@ -467,6 +515,7 @@ with canvas_col:
                     new_holes.append((x, y, r))
         st.session_state.holes = new_holes
     else:
+        erase_canvas_key = f"canvas_erase_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}_{st.session_state.canvas_refresh_counter}"
         canvas_result_brush = st_canvas(
             fill_color="rgba(0,0,0,0.0)",
             stroke_width=st.session_state.erase_brush_size,
@@ -475,7 +524,7 @@ with canvas_col:
             height=ui_h,
             width=ui_w,
             drawing_mode="freedraw",
-            key=f"canvas_erase_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}"
+            key=erase_canvas_key
         )
         if canvas_result_brush.json_data and "objects" in canvas_result_brush.json_data:
             erase_paths = []
@@ -511,6 +560,9 @@ if st.session_state.finalized:
     scale_y = length / export_h
     cavity_contours, hierarchy = find_cavity_contours(export_mask)
 
+      
+#
+# 
     with col3dctrl:
         base_depth = sync_slider_and_input("Foam Base Depth (mm)", 1, 5000, 30, "base_depth")
         cavity_depth = sync_slider_and_input("Cavity Depth (mm)", 1, 5000, 15, "cavity_depth")
