@@ -1,4 +1,4 @@
-                                                                                                                                                                                                                      # CHNAGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
+# CHNAGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
 # ENABLE A PYTHON ENVIRONMENT ------    source foamenv/bin/activate
 
 import streamlit as st
@@ -352,9 +352,6 @@ if uploaded:
     scale = min(UI_MAX_SIZE / max(orig_w, orig_h), 1.0)
     ui_w, ui_h = int(orig_w * scale), int(orig_h * scale)
     ui_image = orig_image.resize((ui_w, ui_h), Image.LANCZOS)
-    ui_np = np.array(ui_image)    # ← add this
-
-
 else:
     st.info("Upload an image to get started.")
     st.stop()
@@ -371,7 +368,7 @@ with canvas_col:
     canvas_result = st_canvas(
         fill_color="rgba(255, 0, 0, 0.3)",
         stroke_width=5,
-        background_image=ui_np,
+        background_image=ui_image,
         update_streamlit=True,
         height=ui_h,
         width=ui_w,
@@ -443,14 +440,12 @@ with canvas_col:
         draw_finger_holes(np.zeros_like(border_mask), holes_for_mask)
     )
     hole_canvas_background = show_mask_overlay_with_holes(ui_image, border_mask, holes_for_mask)
-    hole_bg_np = np.array(hole_canvas_background)  # ← add this
-
 
     if tool_mode == "Circle (add hole)":
         canvas_result_holes = st_canvas(
             fill_color="rgba(255,255,0,0.4)",
             stroke_width=5,
-            background_image=hole_bg_np,
+            background_image=hole_canvas_background,
             update_streamlit=True,
             height=ui_h,
             width=ui_w,
@@ -475,7 +470,7 @@ with canvas_col:
         canvas_result_brush = st_canvas(
             fill_color="rgba(0,0,0,0.0)",
             stroke_width=st.session_state.erase_brush_size,
-            background_image=hole_bg_np,
+            background_image=hole_canvas_background,
             update_streamlit=True,
             height=ui_h,
             width=ui_w,
@@ -564,6 +559,3 @@ if st.session_state.finalized:
                     data=export_dxf_from_contours(cavity_contours, scale_x, scale_y, dxf_file_name),
                     file_name=dxf_file_name
                 )
-
-# try 
-# 44444
