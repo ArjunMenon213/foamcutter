@@ -1,4 +1,4 @@
-FFFFEFEe    rdrdf                                                                                                                                                                                                                        # CHNAGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
+                                                                                                                                                                                                                      # CHNAGE DIRECTORY ------               cd /home/arjunmenon/Desktop/ME437/foamcutout/
 # ENABLE A PYTHON ENVIRONMENT ------    source foamenv/bin/activate
 
 import streamlit as st
