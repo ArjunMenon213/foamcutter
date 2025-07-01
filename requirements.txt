@@ -1,5 +1,6 @@
-streamlit
-streamlit-drawable-canvas
+streamlit==1.31.1
+rich<14,>=10.14.0
+streamlit-drawable-canvas==0.9.5
 Pillow
 numpy
 opencv-python-headless
