@@ -366,19 +366,16 @@ with canvas_col:
     if "bg_pixels" not in st.session_state:
         st.session_state.bg_pixels = []
     canvas_result = st_canvas(
-    fill_color="rgba(255, 0, 0, 0.3)",
-    stroke_width=5,
-    background_image=ui_image,
-    background_image_width=ui_w,      # ← add this
-    background_image_height=ui_h,     # ← and this
-    update_streamlit=True,
-    height=ui_h,
-    width=ui_w,
-    drawing_mode="point",
-    point_display_radius=6,
-    key=...
-)
-
+        fill_color="rgba(255, 0, 0, 0.3)",
+        stroke_width=5,
+        background_image=ui_image,
+        update_streamlit=True,
+        height=ui_h,
+        width=ui_w,
+        drawing_mode="point",
+        point_display_radius=6,
+        key=f"canvas_bg_{ui_w}_{ui_h}_{st.session_state.bg_canvas_key}"
+    )
     bg_points = []
     if canvas_result.json_data and "objects" in canvas_result.json_data:
         bg_points = [
@@ -393,19 +390,13 @@ with slider_col:
         st.session_state.bg_canvas_key += 1
         st.experimental_rerun()
 
-    # show pixel count (but never st.stop())
-    if not st.session_state.bg_pixels:
-        st.warning("No background pixels selected yet.")
+    if st.session_state.bg_pixels:
+        st.write(f"Selected: {len(st.session_state.bg_pixels)} pixels")
+        avg_rgb = get_average_rgb(st.session_state.bg_pixels)
+        st.write(f"Average RGB: {avg_rgb}")
     else:
-        st.write(f"Selected: {len(st.session_state.bg_pixels)} pixels")
-        avg_rgb = get_average_rgb(st.session_state.bg_pixels)
-        st.write(f"Average RGB: {avg_rgb}")
-
-        st.write(f"Selected: {len(st.session_state.bg_pixels)} pixels")
-        avg_rgb = get_average_rgb(st.session_state.bg_pixels)
-        st.write(f"Average RGB: {avg_rgb}")
-
-
+        st.warning("No background pixels selected yet.")
+        st.stop()
 
 st.markdown("### 3. Chroma Key and Border/Finger Holes")
 canvas_col, slider_col = st.columns([2,1])
@@ -455,8 +446,6 @@ with canvas_col:
             fill_color="rgba(255,255,0,0.4)",
             stroke_width=5,
             background_image=hole_canvas_background,
-            background_image_width=ui_w,      # ← add
-            background_image_height=ui_h,     # ← add
             update_streamlit=True,
             height=ui_h,
             width=ui_w,
@@ -479,18 +468,15 @@ with canvas_col:
         st.session_state.holes = new_holes
     else:
         canvas_result_brush = st_canvas(
-    fill_color="rgba(0,0,0,0.0)",
-    stroke_width=st.session_state.erase_brush_size,
-    background_image=hole_canvas_background,
-    background_image_width=ui_w,      # ← add
-    background_image_height=ui_h,     # ← add
-    update_streamlit=True,
-    height=ui_h,
-    width=ui_w,
-    drawing_mode="freedraw",
-    key=...
-)
-
+            fill_color="rgba(0,0,0,0.0)",
+            stroke_width=st.session_state.erase_brush_size,
+            background_image=hole_canvas_background,
+            update_streamlit=True,
+            height=ui_h,
+            width=ui_w,
+            drawing_mode="freedraw",
+            key=f"canvas_erase_{ui_w}_{ui_h}_{st.session_state.hole_canvas_key}"
+        )
         if canvas_result_brush.json_data and "objects" in canvas_result_brush.json_data:
             erase_paths = []
             for obj in canvas_result_brush.json_data["objects"]:
